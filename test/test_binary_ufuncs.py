@@ -32,9 +32,13 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
     precisionOverride,
+    sample_inputs,
     skipIf,
     skipMeta,
     skipXPU,
+    TensorSpec,
+    TensorTemplate,
+    tensor_specs,
 )
 from torch.testing._internal.common_dtype import (
     all_types,
@@ -72,6 +76,8 @@ from torch.testing._internal.common_utils import (
     torch_to_numpy_dtype_dict,
     xfailIfTorchDynamo,
 )
+
+                                                                                                   
 
 
 if TEST_SCIPY:
@@ -1181,9 +1187,14 @@ class TestBinaryUfuncs(TestCase):
     # Tests that trying to add, inplace, a CUDA tensor to a CPU tensor
     #   throws the correct error message
     @onlyCUDA
-    def test_cross_device_inplace_error_msg(self, device):
-        a = torch.tensor(2.0)
-        b = torch.tensor(2.0, device=device)
+    @tensor_specs([
+        TensorSpec([
+            TensorTemplate(shape=[], device="cpu", init=2.0),
+            TensorTemplate(shape=[], init=2.0),
+        ], name="cross_device_inplace"),
+    ])
+    def test_cross_device_inplace_error_msg(self, device, input_tensors):
+        a, b = input_tensors.get_sample_inputs()
         with self.assertRaisesRegex(
             RuntimeError, "Expected all tensors to be on the same device"
         ):

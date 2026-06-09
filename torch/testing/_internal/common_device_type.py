@@ -1019,6 +1019,140 @@ def _serialize_sample(sample_input):
     return str(sample_input)
 
 
+# Template for tensor creation that specifies shape, stride, dtype, device, and initialization.
+# Tensors are realized inside the test function.
+class TensorTemplate:
+    __slots__ = ["shape", "stride", "storage_offset", "dtype", "device", "init"]
+
+    def __init__(self, shape, stride=None, storage_offset=0, dtype=torch.float32, device=None, init="rand"):
+        self.shape = shape
+        self.stride = stride
+        self.storage_offset = storage_offset
+        self.dtype = dtype
+        self.device = device
+        self.init = init
+
+    def get_sample_input(self, test_device):
+        # Resolve device: None means use test's device; explicit values are used as-is
+        device = test_device if self.device is None else self.device
+
+        # Calculate total elements needed (accounting for stride and storage_offset)
+        if self.stride is not None:
+            # Calculate storage size based on stride and shape
+            storage_size = self.storage_offset + sum((s - 1) * st for s, st in zip(self.shape, self.stride))
+        else:
+            storage_size = self.storage_offset + sum(self.shape)
+
+        # Create tensor based on init
+        if self.init == "rand":
+            storage = torch.rand(storage_size, dtype=self.dtype, device=device)
+        elif self.init == "randn":
+            storage = torch.randn(storage_size, dtype=self.dtype, device=device)
+        elif self.init == "ones":
+            storage = torch.ones(storage_size, dtype=self.dtype, device=device)
+        elif self.init == "zeros":
+            storage = torch.zeros(storage_size, dtype=self.dtype, device=device)
+        elif isinstance(self.init, (int, float)):
+            storage = torch.full((storage_size,), self.init, dtype=self.dtype, device=device)
+        else:
+            raise ValueError(f"Unknown init: {self.init}")
+
+        # Create the viewed tensor
+        tensor = torch.as_strided(
+            storage[self.storage_offset:],
+            self.shape,
+            self.stride if self.stride is not None else torch.ones(len(self.shape), dtype=torch.long).tolist()
+        )
+        return tensor
+
+    def __repr__(self):
+        device_repr = self.device if self.device is not None else "test_device"
+        return f"TensorTemplate(shape={self.shape}, stride={self.stride}, dtype={self.dtype}, device={device_repr})"
+
+
+# Container for a list of tensor templates representing the input to an operation.
+class TensorSpec:
+    __slots__ = ["inputs", "name"]
+
+    def __init__(self, inputs, name=None):
+        self.inputs = inputs
+        self.name = name
+
+    def get_sample_inputs(self, device):
+        return [t.get_sample_input(device) if isinstance(t, TensorTemplate) else t for t in self.inputs]
+
+    def __repr__(self):
+        if self.name:
+            return f"TensorSpec({self.name})"
+        return f"TensorSpec({len(self.inputs)} tensors)"
+
+
+# Decorator that defines tensor specs for test instantiation.
+#
+# Example usage:
+#
+# @tensor_specs([
+#     TensorSpec([
+#         TensorTemplate(shape=[1, 11, 2880], stride=[31680, 2880, 1], dtype=torch.float16, device="cuda"),
+#         TensorTemplate(shape=[4096, 2880], stride=[2880, 1], dtype=torch.float16, device="cuda"),
+#     ], name="my_tensors"),
+# ])
+# def test_my_op(self, device, input_tensors):
+#     a, b = input_tensors
+#     <test_code>
+class tensor_specs(_TestParametrizer):
+    def __init__(self, specs_list):
+        if specs_list is None:
+            raise ValueError(
+                "The @tensor_specs decorator got None, expected an iterable of TensorSpec"
+            )
+        self.specs_list = specs_list
+
+    def _parametrize_test(self, test, generic_cls, device_cls):
+        """Parameterizes the given test function across each tensor spec."""
+        if device_cls is None:
+            raise RuntimeError(
+                "The @tensor_specs decorator is only intended to be used in a device-specific "
+                "context; use it with instantiate_device_type_tests() instead of "
+                "instantiate_parametrized_tests()"
+            )
+
+        spec = check_exhausted_iterator = object()
+        for spec in self.specs_list:
+            if spec is None:
+                raise ValueError(
+                    "The @tensor_specs decorator got a None spec"
+                )
+            test_name = spec.name if spec.name else str(spec)
+            param_kwargs = {"input_tensors": spec}
+
+            @wraps(test)
+            def test_wrapper(*args, **kwargs):
+                return test(*args, **kwargs)
+
+            # Wrap the spec so it realizes tensors when accessed
+            original_spec = spec
+            class RealizingSpec:
+                def __init__(self, spec, device):
+                    self._spec = spec
+                    self._device = device
+                    self.name = spec.name
+
+                def get_sample_inputs(self):
+                    return self._spec.get_sample_inputs(self._device)
+
+            param_kwargs = {
+                "input_tensors": RealizingSpec(spec, device_cls.device_type)
+            }
+
+            yield (test_wrapper, test_name, param_kwargs, lambda _: [])
+
+        if spec is check_exhausted_iterator:
+            raise ValueError(
+                "The @tensor_specs decorator got an empty list of tensor specs"
+            )
+
+
 # Decorator that defines the OpInfos a test template should be instantiated for.
 #
 # Example usage:
@@ -1057,8 +1191,6 @@ def _serialize_sample(sample_input):
 #
 # These options allow tests to have considerable control over the dtypes
 #   they're instantiated for.
-
-
 class ops(_TestParametrizer):
     def __init__(
         self,
