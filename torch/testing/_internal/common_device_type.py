@@ -1100,7 +1100,7 @@ class TensorSpec:
 # def test_my_op(self, device, input_tensors):
 #     a, b = input_tensors
 #     <test_code>
-class tensor_specs(_TestParametrizer):
+class sample_tensor_inputs(_TestParametrizer):
     def __init__(self, specs_list):
         if specs_list is None:
             raise ValueError(
@@ -1126,30 +1126,37 @@ class tensor_specs(_TestParametrizer):
             test_name = spec.name if spec.name else str(spec)
             param_kwargs = {"input_tensors": spec}
 
-            @wraps(test)
-            def test_wrapper(*args, **kwargs):
-                return test(*args, **kwargs)
+            try:
+                @wraps(test)
+                def test_wrapper(*args, **kwargs):
+                    return test(*args, **kwargs)
 
-            # Wrap the spec so it realizes tensors when accessed
-            original_spec = spec
-            class RealizingSpec:
-                def __init__(self, spec, device):
-                    self._spec = spec
-                    self._device = device
-                    self.name = spec.name
+                # Wrap the spec so it realizes tensors when accessed
+                original_spec = spec
+                class RealizingSpec:
+                    def __init__(self, spec, device):
+                        self._spec = spec
+                        self._device = device
+                        self.name = spec.name
 
-                def get_sample_inputs(self):
-                    return self._spec.get_sample_inputs(self._device)
+                    def get_sample_inputs(self):
+                        return self._spec.get_sample_inputs(self._device)
 
-            param_kwargs = {
-                "input_tensors": RealizingSpec(spec, device_cls.device_type)
-            }
+                param_kwargs = {
+                    "input_tensors": RealizingSpec(spec, device_cls.device_type)
+                }
 
-            yield (test_wrapper, test_name, param_kwargs, lambda _: [])
+                yield (test_wrapper, test_name, param_kwargs, lambda _: [])
+            
+            except Exception as ex:
+                    # Provides an error message for debugging before rethrowing the exception
+                    print(f"Failed to instantiate {test_name} for op {spec.name}!")
+                    raise ex
+
 
         if spec is check_exhausted_iterator:
             raise ValueError(
-                "The @tensor_specs decorator got an empty list of tensor specs"
+                "The @sample_tensor_inputs decorator got an empty list of tensor specs"
             )
 
 

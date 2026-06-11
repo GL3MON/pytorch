@@ -38,7 +38,7 @@ from torch.testing._internal.common_device_type import (
     skipXPU,
     TensorSpec,
     TensorTemplate,
-    tensor_specs,
+    sample_tensor_inputs,
 )
 from torch.testing._internal.common_dtype import (
     all_types,
@@ -1187,7 +1187,7 @@ class TestBinaryUfuncs(TestCase):
     # Tests that trying to add, inplace, a CUDA tensor to a CPU tensor
     #   throws the correct error message
     @onlyCUDA
-    @tensor_specs([
+    @sample_tensor_inputs([
         TensorSpec([
             TensorTemplate(shape=[], device="cpu", init=2.0),
             TensorTemplate(shape=[], init=2.0),
