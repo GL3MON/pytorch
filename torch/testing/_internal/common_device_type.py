@@ -951,7 +951,6 @@ def instantiate_device_type_tests(
                 nontest = getattr(generic_test_class, name)
                 setattr(device_type_test_class, name, nontest)
 
-        # Mimics defining the instantiated class in the caller's file
         # by setting its module to the given class's and adding
         # the module to the given scope.
         # This lets the instantiated class be discovered by unittest.
@@ -1032,42 +1031,48 @@ class TensorTemplate:
         self.device = device
         self.init = init
 
-    def get_sample_input(self, test_device):
+    def get_sample_input(self, test_device, seed):
+        from torch.testing import make_tensor
+
         # Resolve device: None means use test's device; explicit values are used as-is
         device = test_device if self.device is None else self.device
+        self.device = device
 
-        # Calculate total elements needed (accounting for stride and storage_offset)
+        # Calculate storage size needed (accounting for stride and storage_offset)
         if self.stride is not None:
-            # Calculate storage size based on stride and shape
             storage_size = self.storage_offset + sum((s - 1) * st for s, st in zip(self.shape, self.stride))
         else:
-            storage_size = self.storage_offset + sum(self.shape)
+            storage_size = self.storage_offset + (sum(self.shape) if len(self.shape) > 0 else 1)
 
-        # Create tensor based on init
+        # Use make_tensor for tensor creation based on init type
         if self.init == "rand":
-            storage = torch.rand(storage_size, dtype=self.dtype, device=device)
+            # rand uses uniform [0, 1)
+            tensor = make_tensor(storage_size, dtype=self.dtype, device=device, low=0.0, high=1.0)
         elif self.init == "randn":
-            storage = torch.randn(storage_size, dtype=self.dtype, device=device)
+            # randn uses normal distribution - make_tensor defaults
+            tensor = make_tensor(storage_size, dtype=self.dtype, device=device)
         elif self.init == "ones":
-            storage = torch.ones(storage_size, dtype=self.dtype, device=device)
+            tensor = torch.full((storage_size,), 1.0, dtype=self.dtype, device=device)
         elif self.init == "zeros":
-            storage = torch.zeros(storage_size, dtype=self.dtype, device=device)
+            tensor = torch.zeros(storage_size, dtype=self.dtype, device=device)
         elif isinstance(self.init, (int, float)):
-            storage = torch.full((storage_size,), self.init, dtype=self.dtype, device=device)
+            tensor = torch.full((storage_size,), self.init, dtype=self.dtype, device=device)
         else:
             raise ValueError(f"Unknown init: {self.init}")
 
-        # Create the viewed tensor
-        tensor = torch.as_strided(
-            storage[self.storage_offset:],
-            self.shape,
-            self.stride if self.stride is not None else torch.ones(len(self.shape), dtype=torch.long).tolist()
-        )
+        # Slice off storage_offset and apply stride/view
+        tensor = tensor[self.storage_offset:]
+        if self.stride is not None:
+            tensor = torch.as_strided(tensor, self.shape, self.stride)
+        else:
+            tensor = tensor.view(self.shape)
+
         return tensor
 
     def __repr__(self):
         device_repr = self.device if self.device is not None else "test_device"
         return f"TensorTemplate(shape={self.shape}, stride={self.stride}, dtype={self.dtype}, device={device_repr})"
+    
 
 
 # Container for a list of tensor templates representing the input to an operation.
@@ -1078,8 +1083,8 @@ class TensorSpec:
         self.inputs = inputs
         self.name = name
 
-    def get_sample_inputs(self, device):
-        return [t.get_sample_input(device) if isinstance(t, TensorTemplate) else t for t in self.inputs]
+    def get_sample_inputs(self, device, seed=42):
+        return [t.get_sample_input(device, seed) if isinstance(t, TensorTemplate) else t for t in self.inputs]
 
     def __repr__(self):
         if self.name:
@@ -1091,7 +1096,7 @@ class TensorSpec:
 #
 # Example usage:
 #
-# @tensor_specs([
+# @sample_tensor_inputs([
 #     TensorSpec([
 #         TensorTemplate(shape=[1, 11, 2880], stride=[31680, 2880, 1], dtype=torch.float16, device="cuda"),
 #         TensorTemplate(shape=[4096, 2880], stride=[2880, 1], dtype=torch.float16, device="cuda"),
@@ -1104,7 +1109,7 @@ class sample_tensor_inputs(_TestParametrizer):
     def __init__(self, specs_list):
         if specs_list is None:
             raise ValueError(
-                "The @tensor_specs decorator got None, expected an iterable of TensorSpec"
+                "The @sample_tensor_inputs decorator got None, expected an iterable of TensorSpec"
             )
         self.specs_list = specs_list
 
@@ -1112,7 +1117,7 @@ class sample_tensor_inputs(_TestParametrizer):
         """Parameterizes the given test function across each tensor spec."""
         if device_cls is None:
             raise RuntimeError(
-                "The @tensor_specs decorator is only intended to be used in a device-specific "
+                "The @sample_tensor_inputs decorator is only intended to be used in a device-specific "
                 "context; use it with instantiate_device_type_tests() instead of "
                 "instantiate_parametrized_tests()"
             )
@@ -1121,7 +1126,7 @@ class sample_tensor_inputs(_TestParametrizer):
         for spec in self.specs_list:
             if spec is None:
                 raise ValueError(
-                    "The @tensor_specs decorator got a None spec"
+                    "The @sample_tensor_inputs decorator got a None spec"
                 )
             test_name = spec.name if spec.name else str(spec)
             param_kwargs = {"input_tensors": spec}
@@ -1134,13 +1139,14 @@ class sample_tensor_inputs(_TestParametrizer):
                 # Wrap the spec so it realizes tensors when accessed
                 original_spec = spec
                 class RealizingSpec:
-                    def __init__(self, spec, device):
+                    def __init__(self, spec, device, seed=42):
                         self._spec = spec
                         self._device = device
+                        self._seed = seed
                         self.name = spec.name
 
                     def get_sample_inputs(self):
-                        return self._spec.get_sample_inputs(self._device)
+                        return self._spec.get_sample_inputs(self._device, self._seed)
 
                 param_kwargs = {
                     "input_tensors": RealizingSpec(spec, device_cls.device_type)
