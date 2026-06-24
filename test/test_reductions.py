@@ -2477,10 +2477,13 @@ class TestReductions(TestCase):
         def run_test(input_):
             M, N = input_.shape
             input_.zero_()
+            # print(f"input: {input_}")
             for i in range(min(M, N)):
                 input_[i][i] = 1
+            # print(f"input: {input_}")
             output1 = input_.argmax(dim=0)
             output2 = input_.sum(dim=0)
+            print(output2)
             for i in range(min(M, N)):
                 self.assertEqual(output1[i], i)
                 self.assertEqual(output2[i], 1)
