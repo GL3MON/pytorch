@@ -9,6 +9,7 @@ import torch
 from torch import nan
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
     dtypes,
     dtypesIfCPU,
     dtypesIfCUDA,
@@ -183,21 +184,19 @@ class TestSortAndSelect(TestCase):
         ):
             torch.sort(input=x)
 
-    @onlyCUDA
+    @deviceCountAtLeast(1)
     def test_sort_large_slice(self, device):
         # tests direct cub path
         x = torch.randn(4, 1024000, device=device)
         res1val, res1ind = torch.sort(x, stable=True)
-        torch.cuda.synchronize()
         # assertIsOrdered is too slow, so just compare to cpu
         res1val_cpu, res1ind_cpu = torch.sort(x.cpu(), stable=True)
-        self.assertEqual(res1val, res1val_cpu.cuda())
-        self.assertEqual(res1ind, res1ind_cpu.cuda())
+        self.assertEqual(res1val, res1val_cpu.to(device))
+        self.assertEqual(res1ind, res1ind_cpu.to(device))
         res1val, res1ind = torch.sort(x, descending=True, stable=True)
-        torch.cuda.synchronize()
         res1val_cpu, res1ind_cpu = torch.sort(x.cpu(), descending=True, stable=True)
-        self.assertEqual(res1val, res1val_cpu.cuda())
-        self.assertEqual(res1ind, res1ind_cpu.cuda())
+        self.assertEqual(res1val, res1val_cpu.to(device))
+        self.assertEqual(res1ind, res1ind_cpu.to(device))
 
     @dtypes(*all_types_and(torch.bool, torch.half, torch.bfloat16))
     def test_stable_sort(self, device, dtype):
@@ -214,7 +213,7 @@ class TestSortAndSelect(TestCase):
                 torch.arange(start=1, end=2 * ncopies, step=2, device=device),
             )
 
-    @onlyCUDA
+    @deviceCountAtLeast(1)
     @dtypes(torch.float16)
     @largeTensorTest("200GB")  # Unfortunately 80GB A100 is not large enough
     def test_sort_large(self, device, dtype):
@@ -277,13 +276,13 @@ class TestSortAndSelect(TestCase):
                     )
 
                     # assert stride is preserved
-                    if self.device_type == "cuda":
+                    if self.device_type != "cpu":
                         # FIXME: this behavior should be true for all cases, not
                         # just the one specified in if condition
                         self.assertEqual(r1.values.stride(), t.stride())
                         self.assertEqual(r1.indices.stride(), t.stride())
 
-    @onlyCUDA
+    @deviceCountAtLeast(1)
     @dtypes(torch.float32)
     def test_sort_discontiguous(self, device, dtype):
         self._test_sort_discontiguous(device, dtype)
@@ -353,7 +352,7 @@ class TestSortAndSelect(TestCase):
                 # binary strings
                 yield (torch.tensor([0, 1] * size, dtype=dtype, device=device), 0)
 
-            if self.device_type == "cuda":
+            if self.device_type != "cpu":
                 return
 
             yield (torch.tensor([0, 1] * 100, dtype=dtype, device=device), 0)
@@ -803,7 +802,7 @@ class TestSortAndSelect(TestCase):
         run_test(device, torch.uint8)
         run_test(device, torch.bool)
 
-    @onlyCUDA
+    @deviceCountAtLeast(1)
     def test_topk_noncontiguous_gpu(self, device):
         # test different topk paths on cuda
         single_block_t = torch.randn(20, device=device)[::2]
@@ -851,8 +850,7 @@ class TestSortAndSelect(TestCase):
         for curr_size in (small, large, verylarge):
             self._test_topk_dtype(device, dtype, False, curr_size)
 
-    @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
-    @dtypes(torch.float, torch.double, torch.bfloat16, torch.half)
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_topk_nonfinite(self, device, dtype):
         x = torch.tensor(
             [float("nan"), float("inf"), 1e4, 0, -1e4, -float("inf")],
@@ -888,8 +886,7 @@ class TestSortAndSelect(TestCase):
             self.assertEqual(ind, expected_ind, atol=0, rtol=0)
 
     @onlyNativeDeviceTypes
-    @dtypesIfCUDA(*all_types_and(torch.bfloat16))
-    @dtypes(*all_types_and(torch.bfloat16, torch.half))
+    @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_topk_zero(self, device, dtype):
         # https://github.com/pytorch/pytorch/issues/49205
         t = torch.rand(2, 2, device=device).to(dtype=dtype)
@@ -1033,8 +1030,7 @@ class TestSortAndSelect(TestCase):
                                 count += 1
                         self.assertEqual(j, count)
 
-    @dtypesIfCPU(*all_types_and(torch.bool, torch.float16, torch.bfloat16))
-    @dtypes(*all_types_and(torch.half, torch.bool))
+    @dtypes(*all_types_and(torch.bool, torch.half, torch.bfloat16))
     def test_unique_consecutive(self, device, dtype):
         if dtype is torch.bool:
             x = torch.tensor(
@@ -1151,8 +1147,7 @@ class TestSortAndSelect(TestCase):
         self.assertEqual(res[0], ref[0].squeeze())
         self.assertEqual(res[1], ref[1].squeeze())
 
-    @dtypes(*all_types())
-    @dtypesIfCUDA(*all_types_and(torch.half))
+    @dtypes(*all_types_and(torch.half))
     def test_isin(self, device, dtype):
         def assert_isin_equal(a, b):
             # Compare to the numpy reference implementation.

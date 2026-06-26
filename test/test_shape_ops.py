@@ -12,6 +12,7 @@ import torch
 from torch import nan
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
     dtypes,
     dtypesIfCUDA,
     dtypesIfXPU,
@@ -71,9 +72,9 @@ def _generate_input(shape, dtype, device, with_extremal):
 
 class TestShapeOps(TestCase):
     # TODO: update to work on CUDA, too
-    @onlyCPU
+    @onlyNativeDeviceTypes
     def test_unbind(self, device):
-        x = torch.rand(2, 3, 4, 5)
+        x = torch.rand(2, 3, 4, 5, device=device)
         for dim in range(4):
             res = torch.unbind(x, dim)
             res2 = x.unbind(dim)
@@ -85,7 +86,7 @@ class TestShapeOps(TestCase):
 
     # TODO: update to work on CUDA, too?
     @skipIfTorchDynamo("TorchDynamo fails with an unknown error")
-    @onlyCPU
+    @onlyNativeDeviceTypes
     def test_tolist(self, device):
         list0D = []
         tensor0D = torch.tensor(list0D)
@@ -215,7 +216,7 @@ class TestShapeOps(TestCase):
                         )
 
             # Move dim to same position
-            x = torch.randn(2, 3, 5, 7, 11)
+            x = torch.randn(2, 3, 5, 7, device=device)
             torch_fn = partial(fn, source=(0, 1), destination=(0, 1))
             np_fn = partial(np.moveaxis, source=(0, 1), destination=(0, 1))
             self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
@@ -252,27 +253,25 @@ class TestShapeOps(TestCase):
         expected = torch.diag(x, 17)
         self.assertEqual(result, expected)
 
-    @onlyCPU
+    @onlyNativeDeviceTypes
     @dtypes(torch.float)
     def test_diagonal_multidim(self, device, dtype):
         x = torch.randn(10, 11, 12, 13, dtype=dtype, device=device)
-        xn = x.numpy()
+        xn = x.cpu().numpy()
         for args in [(2, 2, 3), (2,), (-2, 1, 2), (0, -2, -1)]:
             result = torch.diagonal(x, *args)
             expected = xn.diagonal(*args)
             self.assertEqual(expected.shape, result.shape)
-            self.assertEqual(expected, result)
+            self.assertEqual(expected, result.cpu())
         # test non-contiguous
         xp = x.permute(1, 2, 3, 0)
         result = torch.diagonal(xp, 0, -2, -1)
-        expected = xp.numpy().diagonal(0, -2, -1)
+        expected = xp.cpu().numpy().diagonal(0, -2, -1)
         self.assertEqual(expected.shape, result.shape)
-        self.assertEqual(expected, result)
+        self.assertEqual(expected, result.cpu())
 
     @onlyNativeDeviceTypes
-    @dtypes(*all_types())
-    @dtypesIfCUDA(*all_types_and(torch.half))
-    @dtypesIfXPU(*all_types_and(torch.half))
+    @dtypes(*all_types_and(torch.half))
     def test_trace(self, device, dtype):
         def test(shape):
             tensor = make_tensor(shape, dtype=dtype, device=device, low=-9, high=9)
@@ -472,33 +471,33 @@ class TestShapeOps(TestCase):
             yield in_t, dims, out_t
 
             # vectorized NCHW cases (images)
-            if device == "cpu" and dtype != torch.bfloat16:
+            if self.device_type == "cpu" and dtype != torch.bfloat16:
                 for mf in [torch.contiguous_format, torch.channels_last]:
                     for c in [2, 3, 8, 16]:
                         in_t = make_from_size((2, c, 32, 32)).contiguous(
                             memory_format=mf
                         )
-                        np_in_t = in_t.numpy()
+                        np_in_t = in_t.cpu().numpy()
 
                         np_out_t = np_in_t[:, :, :, ::-1].copy()
-                        out_t = torch.from_numpy(np_out_t)
+                        out_t = torch.from_numpy(np_out_t).to(device)
                         yield in_t, 3, out_t
 
                         np_out_t = np_in_t[:, :, ::-1, :].copy()
-                        out_t = torch.from_numpy(np_out_t)
+                        out_t = torch.from_numpy(np_out_t).to(device)
                         yield in_t, 2, out_t
 
                         # non-contig cases
                         in_tt = in_t[..., ::2, :]
-                        np_in_t = in_tt.numpy()
+                        np_in_t = in_tt.cpu().numpy()
                         np_out_t = np_in_t[:, :, :, ::-1].copy()
-                        out_t = torch.from_numpy(np_out_t)
+                        out_t = torch.from_numpy(np_out_t).to(device)
                         yield in_tt, 3, out_t
 
                         in_tt = in_t[..., ::2]
-                        np_in_t = in_tt.numpy()
+                        np_in_t = in_tt.cpu().numpy()
                         np_out_t = np_in_t[:, :, :, ::-1].copy()
-                        out_t = torch.from_numpy(np_out_t)
+                        out_t = torch.from_numpy(np_out_t).to(device)
                         yield in_tt, 3, out_t
 
             # Noops (edge cases)
@@ -570,14 +569,14 @@ class TestShapeOps(TestCase):
                     np_fn = partial(np.flip, axis=flip_dim)
                     self.compare_with_numpy(torch_fn, np_fn, data)
 
-    @onlyOn(["cuda", "xpu"])  # CPU is too slow
+    @onlyNativeDeviceTypes
     @largeTensorTest("17GB")  # 4 tensors of 4GB (in, out) x (torch, numpy) + 1GB
     @largeTensorTest(
         "81GB", "cpu"
     )  # even for CUDA test, sufficient system memory is required
     @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     def test_flip_large_tensor(self, device):
-        t_in = torch.empty(2**32 + 1, dtype=torch.uint8).random_()
+        t_in = torch.empty(2**32 + 1, dtype=torch.uint8, device=device).random_()
         torch_fn = partial(torch.flip, dims=(0,))
         np_fn = partial(np.flip, axis=0)
         self.compare_with_numpy(torch_fn, np_fn, t_in)
@@ -715,16 +714,12 @@ class TestShapeOps(TestCase):
                         tensor, out=torch.empty([], dtype=torch.float, device=device)
                     ),
                 )
-            if (
-                self.device_type == "cuda"
-                or self.device_type == "xpu"
-                or self.device_type == TEST_PRIVATEUSE1_DEVICE_TYPE
-            ):
+            if self.device_type != "cpu":
                 self.assertRaisesRegex(
                     RuntimeError,
                     "on the same device",
                     lambda: torch.nonzero(
-                        tensor, out=torch.empty([], dtype=torch.long)
+                        tensor, out=torch.empty([], dtype=torch.long, device="cpu")
                     ),
                 )
             np_array = (

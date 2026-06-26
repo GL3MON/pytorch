@@ -1577,7 +1577,8 @@ class TestFFT(TestCase):
         self.assertEqual(i_original.repeat(1, 1), i_single, atol=1e-6, rtol=0, exact_dtype=True)
         self.assertEqual(i_original.repeat(4, 1), i_multi, atol=1e-6, rtol=0, exact_dtype=True)
 
-    @onlyCUDA
+    @deviceCountAtLeast(1)
+    @onlyNativeDeviceTypes
     @skipIf(not TEST_MKL, "Test requires MKL")
     def test_stft_window_device(self, device):
         # Test the (i)stft window must be on the same device as the input

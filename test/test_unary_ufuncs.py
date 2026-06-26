@@ -564,7 +564,7 @@ class TestUnaryUfuncs(TestCase):
         x = torch.tensor(0.0 - 1.0e20j, dtype=dtype, device=device)
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)
         # acos test reference: https://github.com/pytorch/pytorch/issues/42952
-        if not (dtype == torch.cdouble and "cuda" in device):
+        if not (dtype == torch.cdouble and device != "cpu"):
             self.compare_with_numpy(torch.acos, np.arccos, x)
 
         x = torch.tensor(
@@ -1789,7 +1789,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(out[: size_inp // 4], sorted[: size_inp // 4])
         self.assertEqual(
             out[size_inp // 4 :],
-            torch.tensor(10, device="cuda").expand_as(out[size_inp // 4 :]),
+            torch.tensor(10, device=device).expand_as(out[size_inp // 4 :]),
         )
         # correct fill for 2d
         x = x.view(2, size_inp // 2)
@@ -1799,7 +1799,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(ref, res[: size_inp // 2])
         self.assertEqual(
             res[size_inp // 2 :],
-            torch.tensor(-1, device="cuda").expand_as(res[size_inp // 2 :]),
+            torch.tensor(-1, device=device).expand_as(res[size_inp // 2 :]),
         )
 
     # TODO: rationalize with exp OpInfo

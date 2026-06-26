@@ -318,11 +318,12 @@ class TestMasked(TestCase):
             self.assertEqualMasked(actual, expected, outmask)
 
     @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/1992")
+    @onlyNativeDeviceTypes
     @parametrize("sparse_kind,fill_value", [('coo', 0), ('hybrid_coo', 0),
                                             ('coo', 123), ('hybrid_coo', 123),
                                             ('csr', 0), ('csr', 123)],
                  name_fn=lambda sparse_kind, fill_value: f'{sparse_kind}_fill_value_{fill_value}')
-    def test_where(self, sparse_kind, fill_value):
+    def test_where(self, device, sparse_kind, fill_value):
 
         is_hybrid = False
         if sparse_kind == 'coo':
@@ -359,7 +360,7 @@ class TestMasked(TestCase):
                              [0, 0, 0, 0, 0],
                              [0, 0, 1, 1, 0],
                              [1, 1, 0, 0, 0]]).to(dtype=bool)
-        mask = to_sparse(mask)
+        mask = to_sparse(mask.to(device))
         # make some specified mask elements as explicit masked-out masks:
         if is_hybrid:
             set_values(mask, (1, 1), False)
@@ -374,7 +375,7 @@ class TestMasked(TestCase):
                               [0, 0, 6, 7, 0],
                               [0, 8, 9, 0, -3],
                               [10, 11, 0, 0, -5]])
-        input = to_sparse(input)
+        input = to_sparse(input.to(device))
         # make specified input elements have zero values:
         if is_hybrid:
             set_values(input, (1, 1), 0)
@@ -395,7 +396,7 @@ class TestMasked(TestCase):
                             [0, 0, 0, 0, 0],
                             [F, F, 9, F, F],
                             [Z, 11, F, F, F]])
-        tmp = to_sparse(tmp)
+        tmp = to_sparse(tmp.to(device))
 
 
         sparse = torch.masked._where(mask, input,

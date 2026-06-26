@@ -1168,8 +1168,8 @@ class TestBinaryUfuncs(TestCase):
         res = nom / denom
         self.assertEqual(res, expected)
 
-    @onlyCUDA
-    @dtypes(torch.float, torch.bfloat16)
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float, torch.float16, torch.bfloat16)
     def test_division_by_scalar(self, device, dtype):
         num = torch.rand(1024, device=device, dtype=dtype)
         denom = torch.logspace(-4, 4, steps=20)
@@ -1184,7 +1184,8 @@ class TestBinaryUfuncs(TestCase):
 
     # Tests that trying to add, inplace, a CUDA tensor to a CPU tensor
     #   throws the correct error message
-    @onlyCUDA
+    @deviceCountAtLeast(1)
+    @onlyNativeDeviceTypes
     def test_cross_device_inplace_error_msg(self, device):
         a = torch.tensor(2.0)
         b = torch.tensor(2.0, device=device)
@@ -1672,7 +1673,7 @@ class TestBinaryUfuncs(TestCase):
             for tensor in tensors:
                 self._test_pow(base, tensor)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyNativeDeviceTypes
     def test_cuda_tensor_pow_scalar_tensor(self, device):
         cuda_tensors = [
             torch.randn((3, 3), device=device),
@@ -1686,11 +1687,11 @@ class TestBinaryUfuncs(TestCase):
         for base, exp in product(cuda_tensors, scalar_tensors):
             self._test_pow(base, exp)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyNativeDeviceTypes
     def test_cpu_tensor_pow_cuda_scalar_tensor(self, device):
         cuda_tensors = [
-            torch.tensor(5.0, device=device_type),
-            torch.tensor(-3, device=device_type),
+            torch.tensor(5.0, device=device),
+            torch.tensor(-3, device=device),
         ]
         for exp in cuda_tensors:
             base = torch.randn((3, 3), device="cpu")
@@ -1701,7 +1702,8 @@ class TestBinaryUfuncs(TestCase):
             base = torch.tensor(3.0, device="cpu")
             self._test_pow(base, exp)
 
-    @onlyCUDA
+    @deviceCountAtLeast(1)
+    @onlyNativeDeviceTypes
     @dtypes(torch.complex64, torch.complex128)
     def test_pow_cuda_complex_extremal_passing(self, device, dtype):
         t = torch.tensor(complex(-1.0, float("inf")), dtype=dtype, device=device)
@@ -1825,7 +1827,7 @@ class TestBinaryUfuncs(TestCase):
     # binary operation, and that CUDA "scalars" cannot be used in the same
     # binary operation as non-scalar CPU tensors.
     @deviceCountAtLeast(2)
-    @onlyOn(["cuda", "xpu"])
+    @onlyNativeDeviceTypes
     def test_cross_device_binary_ops(self, devices):
         vals = (1.0, (2.0,))
         cpu_tensor = torch.randn(2, 2)
@@ -1862,7 +1864,7 @@ class TestBinaryUfuncs(TestCase):
     # in a binary operation in conjunction with a Tensor on all
     # available CUDA devices
     @deviceCountAtLeast(2)
-    @onlyOn(["cuda", "xpu"])
+    @onlyNativeDeviceTypes
     def test_binary_op_scalar_device_unspecified(self, devices):
         scalar_val = torch.tensor(1.0)
         for default_device in devices:
@@ -2311,7 +2313,7 @@ class TestBinaryUfuncs(TestCase):
                     torch.ones(1, device=device, dtype=dtypes[0]),
                 )
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyNativeDeviceTypes
     def test_maximum_minimum_cross_device(self, device):
         a = torch.tensor((1, 2, -1))
         b = torch.tensor((3, 0, 4), device=device)
@@ -2402,9 +2404,7 @@ class TestBinaryUfuncs(TestCase):
         self.assertEqual(result_tangent, expected)
 
     # TODO: tests like this should be generic
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypesIfXPU(torch.half, torch.float, torch.double)
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.half, torch.float, torch.double)
     def test_mul_intertype_scalar(self, device, dtype):
         x = torch.tensor(1.5, dtype=dtype, device=device)
         y = torch.tensor(3, dtype=torch.int32, device=device)
@@ -2467,8 +2467,6 @@ class TestBinaryUfuncs(TestCase):
         self.assertEqual(res_add, res_csub)
 
     # TODO: reconcile with minimum/maximum tests
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypesIfXPU(torch.half, torch.float, torch.double)
     @dtypes(torch.float, torch.double)
     def test_min_max_binary_op_nan(self, device, dtype):
         a = torch.rand(1000, dtype=dtype, device=device)
@@ -2892,7 +2890,6 @@ class TestBinaryUfuncs(TestCase):
 
     @dtypesIfCPU(torch.bfloat16, torch.half, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
-    @skipXPU
     def test_hypot(self, device, dtype):
         inputs = [
             (
@@ -3366,7 +3363,7 @@ class TestBinaryUfuncs(TestCase):
             ):
                 input.heaviside_(values)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyNativeDeviceTypes
     def test_heaviside_cross_device(self, device):
         x = torch.tensor([-9, 5, 0, 6, -2, 2], device=device)
         y = torch.tensor(0)
@@ -3485,7 +3482,6 @@ class TestBinaryUfuncs(TestCase):
             raise AssertionError("m is intentionally a scalar")
         self.assertEqual(torch.pow(2, m), 2**m)
 
-    @skipXPU
     def test_ldexp(self, device):
         # random values
         mantissas = torch.randn(64, device=device)
@@ -3558,7 +3554,7 @@ class TestBinaryUfuncs(TestCase):
                 expected = start + weight * (end - start)
                 self.assertEqual(expected, actual)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyNativeDeviceTypes
     @dtypes(torch.half, torch.bfloat16)
     def test_lerp_lowp(self, device, dtype):
         xvals = (0.0, -30000.0)
@@ -3669,19 +3665,6 @@ class TestBinaryUfuncs(TestCase):
         _test_helper(a, b)
 
     @skipIfTorchDynamo()  # complex infs/nans differ under Dynamo/Inductor
-    @dtypesIfCUDA(
-        torch.float32,
-        torch.float64,
-        torch.bfloat16,
-        torch.complex32,
-        torch.complex64,
-        torch.complex128,
-    )
-    @dtypesIfXPU(
-        torch.float32,
-        torch.float64,
-        torch.bfloat16,
-    )
     @dtypes(
         torch.float32, torch.float64, torch.bfloat16, torch.complex64, torch.complex128
     )
@@ -3848,7 +3831,7 @@ class TestBinaryUfuncs(TestCase):
             lambda: torch.add(m1, m1, out=m2),
         )
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyNativeDeviceTypes
     def test_addsub_half_tensor(self, device):
         x = torch.tensor([60000.0], dtype=torch.half, device=device)
         for op, y, alpha in (
@@ -4588,7 +4571,7 @@ class TestBinaryUfuncs(TestCase):
             x = make_tensor((2, 3, 4), dtype=x_dtype, device=device)
             test_helper(x, q)
 
-    @onlyOn(["cuda", "xpu"])
+    @onlyNativeDeviceTypes
     @dtypes(torch.chalf)
     def test_mul_chalf_tensor_and_cpu_scalar(self, device, dtype):
         # Tests that Tensor and CPU Scalar work for `mul` for chalf.

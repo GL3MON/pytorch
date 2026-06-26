@@ -33,7 +33,7 @@ from torch.testing._internal.common_utils import \
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoCusolver, skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
-     onlyCUDA, skipMeta, skipCUDAIfNotRocm, dtypesIfMPS, largeTensorTest)
+     onlyCUDA, deviceCountAtLeast, skipMeta, skipCUDAIfNotRocm, dtypesIfMPS, largeTensorTest)
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
@@ -1358,7 +1358,7 @@ class TestLinalg(TestCase):
                     continue
 
                 # We need LAPACK or equivalent
-                if ((torch.device(device).type == 'cuda' and not torch.cuda.has_magma and not has_cusolver()) or
+                if ((torch.device(device).type != 'cpu' and not has_cusolver()) or
                    (torch.device(device).type == 'cpu' and not torch._C.has_lapack)):
                     continue
             run_test_case((S, S) , ord, keepdim, norm_dtype)
@@ -1614,7 +1614,7 @@ class TestLinalg(TestCase):
                 if dtype == torch.float16 or dtype == torch.bfloat16:
                     continue
                 # We need LAPACK or equivalent
-                if ((torch.device(device).type == 'cuda' and not torch.cuda.has_magma and not has_cusolver()) or
+                if ((torch.device(device).type != 'cpu' and not has_cusolver()) or
                    (torch.device(device).type == 'cpu' and not torch._C.has_lapack)):
                     continue
             run_test_case(make_arg(shape), ord, dim, keepdim)
@@ -2056,7 +2056,7 @@ class TestLinalg(TestCase):
 
         # TODO: Remove this function once the broken cases are fixed
         def is_broken_matrix_norm_case(ord, x):
-            if self.device_type == 'cuda':
+            if self.device_type != 'cpu':
                 if x.size() == torch.Size([1, 2]):
                     if ord in ['nuc', 2, -2] and isnan(x[0][0]) and x[0][1] == 1:
                         # These cases are broken because of an issue with svd
@@ -3138,7 +3138,7 @@ class TestLinalg(TestCase):
             Q.sum().abs().backward()
 
     # I don't know how much memory this test uses but on complex64 it needs at least 4GB
-    @largeTensorTest("4GB", device="cuda")
+    @largeTensorTest("4GB")
     @serialTest(TEST_CUDA)
     @precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})
     @skipCPUIfNoLapack
@@ -3319,7 +3319,7 @@ class TestLinalg(TestCase):
                 for mat in matrix.contiguous().view(p, n, n):
                     expected_inv_list.append(torch_inverse(mat))
                 expected_inv = torch.stack(expected_inv_list).view(*batches, n, n)
-                if self.device_type == 'cuda' and dtype in [torch.float32, torch.complex64]:
+                if self.device_type != 'cpu' and dtype in [torch.float32, torch.complex64]:
                     # single-inverse is done using cuSOLVER, while batched inverse is done using MAGMA
                     # individual values can be significantly different for fp32, hence rather high rtol is used
                     # the important thing is that torch_inverse passes above checks with identity
@@ -4188,7 +4188,7 @@ class TestLinalg(TestCase):
         check([a, make_tensor(2, dtype=torch.double, device=device)], None, "all tensors must have be the same dtype")
         check([a, a], torch.empty(0, device=device, dtype=torch.double), "expected out tensor to have dtype")
 
-        if self.device_type == 'cuda':
+        if self.device_type != 'cpu':
             check([a, make_tensor(2, dtype=dtype, device="cpu")], None, "all tensors must be on the same device")
             check([a, a], torch.empty(0, dtype=dtype), "expected out tensor to be on device")
 
@@ -6516,23 +6516,23 @@ class TestLinalg(TestCase):
             self.assertEqual(len(w), 1)
 
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
-    @onlyCUDA
-    @largeTensorTest('16GB', device='cuda')
+    @deviceCountAtLeast(1)
+    @largeTensorTest('16GB')
     def test_large_bmm_mm_backward(self, device):
-        A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
-        B = torch.randn([1024, 65536], device="cuda", requires_grad=True)
-        G = torch.randn([1024, 2, 65536], device="cuda")
+        A = torch.randn([1024, 2, 1024], device=device).mT.contiguous().mT
+        B = torch.randn([1024, 65536], device=device, requires_grad=True)
+        G = torch.randn([1024, 2, 65536], device=device)
 
         # Should not create an intermediary tensor of size [1024, 1024, 65536] (256GB of memory) and OOM
         (A @ B).backward(G)
 
     # 4GB should do, but we run tests in parallel in CI, so let's be generous
-    @onlyCUDA
-    @largeTensorTest('16GB', device='cuda')
+    @deviceCountAtLeast(1)
+    @largeTensorTest('16GB')
     def test_large_bmm_backward(self, device):
-        A = torch.randn([1024, 2, 1024], device="cuda").mT.contiguous().mT
-        B = torch.randn([1, 1024, 65536], device="cuda", requires_grad=True)
-        G = torch.randn([1024, 2, 65536], device="cuda")
+        A = torch.randn([1024, 2, 1024], device=device).mT.contiguous().mT
+        B = torch.randn([1, 1024, 65536], device=device, requires_grad=True)
+        G = torch.randn([1024, 2, 65536], device=device)
 
         # Should not create an intermediary tensor of size [1024, 1024, 65536] (256GB of memory) and OOM
         (A @ B).backward(G)
@@ -7064,7 +7064,7 @@ class TestLinalg(TestCase):
         sizes = ((3, 3), (5, 5), (4, 2), (3, 4), (0, 0), (0, 1), (1, 0))
         batches = ((0,), (), (1,), (2,), (3,), (1, 0), (3, 5))
         # Non pivoting just implemented for CUDA
-        pivots = (True, False) if self.device_type == "cuda" else (True,)
+        pivots = (True, False) if self.device_type != "cpu" else (True,)
         fns = (partial(torch.lu, get_infos=True), torch.linalg.lu_factor, torch.linalg.lu_factor_ex)
         for ms, batch, pivot, singular, fn in itertools.product(sizes, batches, pivots, (True, False), fns):
             shape = batch + ms
@@ -7811,7 +7811,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         a = torch.rand(65537, 22, 64, device=device, dtype=torch.half)
         b = torch.rand(65537, 64, 22, device=device, dtype=torch.half)
         c = torch.full((65537, 22, 22), math.nan, dtype=torch.half, device=device)
-        cpu_result = torch.matmul(a.cpu().float(), b.cpu().float()).cuda().half()
+        cpu_result = torch.matmul(a.cpu().float(), b.cpu().float()).to(device).half()
         torch.matmul(a, b, out=c)
         self.assertEqual(c, cpu_result)
 
@@ -8006,7 +8006,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
     def test__int4_mm(self, device, m, k, n):
-        if self.device_type == 'cuda' and not SM80OrLater:
+        if self.device_type != 'cpu' and not SM80OrLater:
             self.skipTest("requires SM80 or later")
 
         if TEST_WITH_ROCM and self.device_type == 'cuda' and not CDNA2OrLater():
@@ -8075,7 +8075,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
     def test_compile_int4_mm(self, device, m, k, n):
-        if self.device_type == 'cuda' and not SM80OrLater:
+        if self.device_type != 'cpu' and not SM80OrLater:
             self.skipTest("requires SM80 or later")
 
         if TEST_WITH_ROCM and self.device_type == 'cuda' and not CDNA2OrLater():
@@ -8127,7 +8127,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     def test__dyn_quant_pack_4bit_weight(self, device, k, n):
         # TODO: Fix https://github.com/pytorch/pytorch/issues/131425 and use OpInfo instead
         # Weight shape is [K x N]
-        if self.device_type == "cuda":
+        if self.device_type != "cpu":
             self.skipTest("CUDA Backend is unsupported")
 
         torch.manual_seed(1)
@@ -8153,7 +8153,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("k", [64, 128])
     @parametrize("n", [4096, 11008])
     def test__dyn_quant_matmul_4bit(self, device, m, k, n):
-        if self.device_type == "cuda":
+        if self.device_type != "cpu":
             self.skipTest("CUDA is unsupported")
 
         q_group = 32
@@ -8225,7 +8225,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("k", [64, 128])
     @parametrize("n", [4096, 11008])
     def test_compile_dyn_quant_matmul_4bit(self, device, m, k, n):
-        if self.device_type == "cuda":
+        if self.device_type != "cpu":
             self.skipTest("CUDA is unsupported")
 
         q_group = 32
@@ -8607,7 +8607,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 self.assertEqual(expect, res1)
                 self.assertEqual(expect, res2)
 
-                if self.device_type == 'cuda':
+                if self.device_type != 'cpu':
                     # check that mixed arguments are rejected
                     self.assertRaises(RuntimeError, lambda: torch.bmm(b1, b2.cpu()))
                     self.assertRaises(RuntimeError, lambda: torch.bmm(b1.cpu(), b2))
@@ -9600,7 +9600,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             with self.assertRaisesRegex(torch.linalg.LinAlgError, r"cholesky_inverse: The diagonal element 2 is zero"):
                 torch.cholesky_inverse(a)
         # cholesky_inverse on GPU does not raise an error for this case
-        elif self.device_type == 'cuda':
+        elif self.device_type != 'cpu':
             out = torch.cholesky_inverse(a)
             self.assertTrue(out.isinf().any() or out.isnan().any())
 
@@ -9765,7 +9765,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 self.assertEqual(b, np.matmul(A.cpu(), x.cpu()))
 
         sub_test(True)
-        if self.device_type == 'cuda':
+        if self.device_type != 'cpu':
             sub_test(False)
 
     @skipCPUIfNoLapack
@@ -9796,7 +9796,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(torch.empty_like(b), b.lu_solve(LU_data, LU_pivots))
 
         sub_test(True)
-        if self.device_type == 'cuda':
+        if self.device_type != 'cpu':
             sub_test(False)
 
     @slowTest
@@ -10392,11 +10392,11 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # test logaddexp with complex values produce the same values (up to machine precision) on cpu and CUDA.
         input_real = torch.tensor([0.052, -0.2115, 0.6913], dtype=torch.float64)
         input_img = torch.tensor([-0.3229, -0.8374, 0.8391], dtype=torch.float64)
-        input_complex = torch.complex(input_real, input_img).cuda()
+        input_complex = torch.complex(input_real, input_img).to(device)
 
         other_real = torch.tensor([0.2550, 0.8769, -0.4884], dtype=torch.float64)
         other_img = torch.tensor([0.6063, 0.4343, -1.4166], dtype=torch.float64)
-        other_complex = torch.complex(other_real, other_img).cuda()
+        other_complex = torch.complex(other_real, other_img).to(device)
 
         out_gpu = torch.logaddexp(input=input_complex, other=other_complex)
         out_cpu = torch.logaddexp(input=input_complex.cpu(), other=other_complex.cpu())
